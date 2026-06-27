@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spreadsheet-monitor
+    restart: unless-stopped
+
+    # Mount credentials, token, .env, and data directories
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.json:/app/token.json
+      - ./.env:/app/.env:ro
+      - ./state:/app/state
+      - ./logs:/app/logs
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - NODE_ENV=production
+
+    # Required for desktop notifications (Linux X server, optional)
+    # Uncomment if running on a desktop Linux host:
+    # environment:
+    #   - DISPLAY=${DISPLAY}
+    # volumes (add):
+    #   - /tmp/.X11-unix:/tmp/.X11-unix
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/status"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
