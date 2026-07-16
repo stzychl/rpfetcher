@@ -1,83 +1,4 @@
-/**
- * dashboard.ts
- *
- * Express web dashboard and REST API.
- *
- * Endpoints:
- *   GET /           → HTML dashboard with live status
- *   GET /status     → JSON: scheduler status + spreadsheet metadata
- *   GET /changes    → JSON: last 50 change events
- *   GET /tabs       → JSON: currently discovered tab names
- *
- * State is updated by index.ts via the exported store object.
- */
-
-import express, { Request, Response } from "express";
-import { DiffResult } from "./diff";
-import { SpreadsheetData } from "./sheets";
-import { SchedulerStatus } from "./scheduler";
-import { logger } from "./logger";
-
-// -------------------------------------------------------------------
-// In-memory state store (updated externally by index.ts)
-// -------------------------------------------------------------------
-
-export interface DashboardState {
-  scheduler: SchedulerStatus;
-  currentData: SpreadsheetData | null;
-  recentChanges: DiffResult[];
-  spreadsheetId: string;
-}
-
-export const dashboardState: DashboardState = {
-  scheduler: {
-    isRunning: false,
-    lastCheckAt: null,
-    nextCheckAt: null,
-    totalChecks: 0,
-    totalErrors: 0,
-    lastError: null,
-  },
-  currentData: null,
-  recentChanges: [],
-  spreadsheetId: "",
-};
-
-/** Adds a diff to the recent changes list (capped at 50) */
-export function recordChange(diff: DiffResult): void {
-  dashboardState.recentChanges.unshift(diff);
-  if (dashboardState.recentChanges.length > 50) {
-    dashboardState.recentChanges.length = 50;
-  }
-}
-
-// -------------------------------------------------------------------
-// Dashboard HTML
-// -------------------------------------------------------------------
-
-function renderDashboardHtml(state: DashboardState): string {
-  const { scheduler, currentData } = state;
-  const tabs = currentData?.tabs ?? [];
-  const totalRows = currentData?.totalRows ?? 0;
-  const lastFetch = currentData?.fetchedAt
-    ? new Date(currentData.fetchedAt).toLocaleString()
-    : "Never";
-
-  const recentChangeSummaries = state.recentChanges.slice(0, 10).map((c) => `
-    <div class="change-card ${c.hasChanges ? "has-changes" : "no-changes"}">
-      <span class="change-time">${new Date(c.detectedAt).toLocaleString()}</span>
-      <span class="change-summary">${escapeHtml(c.summary)}</span>
-    </div>
-  `).join("");
-
-  const tabRows = tabs.map((t) => `
-    <tr>
-      <td>${escapeHtml(t.name)}</td>
-      <td class="align-right">${t.rowCount.toLocaleString()}</td>
-    </tr>
-  `).join("");
-
-  return `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -626,28 +547,28 @@ function renderDashboardHtml(state: DashboardState): string {
         <div class="stats-grid">
           <div class="widget stat-widget">
             <span class="widget-label">SCAN CYCLES</span>
-            <div class="stat-large-val">${scheduler.totalChecks}</div>
+            <div class="stat-large-val">0</div>
             <div class="stat-sub-label">TOTAL LOOPS RUN</div>
             <div class="widget-decor-dots"></div>
           </div>
           
           <div class="widget stat-widget">
             <span class="widget-label">DATABASE SIZE</span>
-            <div class="stat-large-val">${totalRows.toLocaleString()}</div>
+            <div class="stat-large-val">0</div>
             <div class="stat-sub-label">TOTAL ROWS PARSED</div>
             <div class="widget-decor-dots"></div>
           </div>
           
           <div class="widget stat-widget">
             <span class="widget-label">ACTIVE NODES</span>
-            <div class="stat-large-val">${tabs.length}</div>
+            <div class="stat-large-val">0</div>
             <div class="stat-sub-label">DISCOVERED TABS</div>
             <div class="widget-decor-dots"></div>
           </div>
           
-          <div class="widget stat-widget ${scheduler.totalErrors > 0 ? 'alert-widget' : ''}">
+          <div class="widget stat-widget ">
             <span class="widget-label">EXCEPTIONS</span>
-            <div class="stat-large-val ${scheduler.totalErrors > 0 ? 'accent-text' : ''}">${scheduler.totalErrors}</div>
+            <div class="stat-large-val ">0</div>
             <div class="stat-sub-label">CRITICAL ERRORS</div>
             <div class="widget-decor-dots"></div>
           </div>
@@ -686,16 +607,7 @@ function renderDashboardHtml(state: DashboardState): string {
         <div class="widget nodes-widget">
           <span class="widget-label">NODE DIRECTORY</span>
           <div class="nodes-table-wrapper">
-            ${tabs.length === 0 ? "<p class='no-data-msg'>NO ACTIVE NODES DETECTED</p>" : `
-            <table class="nodes-table">
-              <thead>
-                <tr>
-                  <th>NODE ID</th>
-                  <th class="align-right">RECORD SIZE</th>
-                </tr>
-              </thead>
-              <tbody>${tabRows}</tbody>
-            </table>`}
+            <p class='no-data-msg'>NO ACTIVE NODES DETECTED</p>
           </div>
         </div>
       </div>
@@ -712,7 +624,7 @@ function renderDashboardHtml(state: DashboardState): string {
                 <div class="dial-dot"></div>
               </div>
               <div class="dial-inner">
-                <span class="dial-value ${scheduler.isRunning ? '' : 'accent-text'}">${scheduler.isRunning ? "RUNNING" : "HALTED"}</span>
+                <span class="dial-value ">RUNNING</span>
                 <span class="dial-label">ENGINE STATUS</span>
               </div>
             </div>
@@ -720,11 +632,11 @@ function renderDashboardHtml(state: DashboardState): string {
           <div class="dial-footer-info">
             <div class="info-row">
               <span>LAST SYNC:</span>
-              <span class="mono-value">${lastFetch}</span>
+              <span class="mono-value">Never</span>
             </div>
             <div class="info-row">
               <span>NEXT SCAN:</span>
-              <span class="mono-value">${scheduler.nextCheckAt ? new Date(scheduler.nextCheckAt).toLocaleTimeString() : "—"}</span>
+              <span class="mono-value">5:51:39 pm</span>
             </div>
           </div>
         </div>
@@ -733,21 +645,16 @@ function renderDashboardHtml(state: DashboardState): string {
         <div class="widget log-widget">
           <span class="widget-label">SYSTEM EVENT LOG</span>
           <div class="log-timeline">
-            ${state.recentChanges.length === 0
-      ? "<p class='no-data-msg'>EVENT LOG EMPTY</p>"
-      : recentChangeSummaries}
+            <p class='no-data-msg'>EVENT LOG EMPTY</p>
           </div>
         </div>
       </div>
     </div>
     
-    ${scheduler.lastError ? `<section style="border-color:var(--accent); margin-top:20px; border-radius:28px; padding:24px; background:var(--surface-card); border:1px solid var(--accent)">
-      <h2 style="font-family:var(--font-dot); font-size:1.1rem; color:var(--accent); margin-bottom:12px; text-transform:uppercase;">[ Critical Fault ]</h2>
-      <p style="color:var(--accent); font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(scheduler.lastError)}</p>
-    </section>` : ""}
+    
 
     <footer>
-      Spreadsheet Target: ${escapeHtml(state.spreadsheetId)} &bull;
+      Spreadsheet Target:  &bull;
       API: <a href="/status" target="_blank">/status</a> &bull; <a href="/changes" target="_blank">/changes</a> &bull; <a href="/tabs" target="_blank">/tabs</a>
     </footer>
   </div>
@@ -869,8 +776,8 @@ function renderDashboardHtml(state: DashboardState): string {
 
       // Update filter label
       var label = 'TOP 10';
-      if (year && major) label += ' // BATCH \\'' + year + ' - ' + major;
-      else if (year)     label += ' // BATCH \\'' + year + ' (ALL DEPTS)';
+      if (year && major) label += ' // BATCH \'' + year + ' - ' + major;
+      else if (year)     label += ' // BATCH \'' + year + ' (ALL DEPTS)';
       else if (major)    label += ' // ' + major + ' (ALL YEARS)';
       else               label += ' // ALL YEARS - ALL DEPTS';
       if (lbFilterInfo) lbFilterInfo.textContent = label;
@@ -914,7 +821,7 @@ function renderDashboardHtml(state: DashboardState): string {
         var years = Object.keys(data).sort().reverse();
         var yearHtml = '<option value="">ALL YEARS</option>';
         for (var i = 0; i < years.length; i++) {
-          yearHtml += '<option value="' + years[i] + '">BATCH \\'' + years[i] + '</option>';
+          yearHtml += '<option value="' + years[i] + '">BATCH \'' + years[i] + '</option>';
         }
         lbYearSelect.innerHTML = yearHtml;
 
@@ -951,138 +858,4 @@ function renderDashboardHtml(state: DashboardState): string {
     }
   </script>
 </body>
-</html>`;
-}
-
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-// -------------------------------------------------------------------
-// Express app
-// -------------------------------------------------------------------
-
-export function createDashboard(): express.Application {
-  const app = express();
-
-  // GET / — HTML dashboard
-  app.get("/", (_req: Request, res: Response) => {
-    res.send(renderDashboardHtml(dashboardState));
-  });
-
-  // GET /status — JSON status
-  app.get("/status", (_req: Request, res: Response) => {
-    res.json({
-      scheduler: dashboardState.scheduler,
-      spreadsheetId: dashboardState.spreadsheetId,
-      tabCount: dashboardState.currentData?.tabs.length ?? 0,
-      totalRows: dashboardState.currentData?.totalRows ?? 0,
-      lastFetchedAt: dashboardState.currentData?.fetchedAt ?? null,
-    });
-  });
-
-  // GET /changes — recent change events
-  app.get("/changes", (_req: Request, res: Response) => {
-    res.json({
-      count: dashboardState.recentChanges.length,
-      changes: dashboardState.recentChanges,
-    });
-  });
-
-  // GET /tabs — current tab names
-  app.get("/tabs", (_req: Request, res: Response) => {
-    const tabs = dashboardState.currentData?.tabs.map((t) => ({
-      name: t.name,
-      rowCount: t.rowCount,
-    })) ?? [];
-    res.json({ tabs });
-  });
-
-  // GET /api/search — Search data
-  app.get("/api/search", (req: Request, res: Response) => {
-    const q = (req.query.q as string || "").toLowerCase().trim();
-    if (!q) {
-      res.json({ results: [] });
-      return;
-    }
-
-    const results: any[] = [];
-    if (dashboardState.currentData) {
-      for (const tab of dashboardState.currentData.tabs) {
-        // Only search in the COMPLETE LIST tab to avoid duplicates
-        if (tab.name.toUpperCase() !== "COMPLETE LIST") continue;
-        for (const row of tab.rows) {
-          const matches = row.some(cell => cell.toLowerCase().includes(q));
-          if (matches) {
-            results.push({ tab: tab.name, row });
-            if (results.length >= 50) break;
-          }
-        }
-        break; // only one tab to search
-      }
-    }
-    res.json({ results });
-  });
-
-  // GET /api/leaderboard — Grouped Leaderboard
-  app.get("/api/leaderboard", (_req: Request, res: Response) => {
-    const leaderboard: any = {};
-    const seen = new Set<string>(); // deduplicate by roll number
-    if (dashboardState.currentData) {
-      for (const tab of dashboardState.currentData.tabs) {
-        // Only use COMPLETE LIST to avoid duplicates
-        if (tab.name.toUpperCase() !== "COMPLETE LIST") continue;
-        for (const row of tab.rows) {
-          const roll = row.length > 2 ? row[2].trim() : "";
-          if (!roll || seen.has(roll)) continue;
-          seen.add(roll);
-
-          const name = row.length > 3 ? row[3].trim() : "Unknown";
-          // col[9] = total points, may contain commas like "1,248.00"
-          const rawPts = row.length > 9 ? row[9] : (row.length > 0 ? row[row.length - 1] : "0");
-          const points = parseFloat(rawPts.replace(/,/g, "")) || 0;
-          const dept   = row.length > 5 ? row[5].trim() : "";
-
-          // regex: 7376 + year(2) + degree(1) + major(letters) + id(3+)
-          const match = roll.match(/^7376(\d{2})[12]([A-Za-z]+)\d+$/);
-          if (match) {
-            const year  = match[1];
-            const major = match[2].toUpperCase();
-
-            if (!leaderboard[year]) leaderboard[year] = {};
-            if (!leaderboard[year][major]) leaderboard[year][major] = [];
-
-            leaderboard[year][major].push({ name, roll, points, dept });
-          }
-        }
-        break; // only process COMPLETE LIST
-      }
-    }
-
-    // Sort each group by points descending
-    for (const year in leaderboard) {
-      for (const major in leaderboard[year]) {
-        leaderboard[year][major].sort((a: any, b: any) => b.points - a.points);
-      }
-    }
-
-    res.json(leaderboard);
-  });
-
-  return app;
-}
-
-/**
- * Starts the Express dashboard server.
- */
-export function startDashboard(port: number): void {
-  const app = createDashboard();
-  app.listen(port, () => {
-    logger.info(`[dashboard] Web dashboard running at http://localhost:${port}`);
-  });
-}
+</html>

@@ -82,15 +82,6 @@ async function withRetry<T>(
 }
 
 /**
- * Normalises a cell value from the Sheets API to a plain string.
- * The API returns cells as objects with a .formattedValue field,
- * or undefined for empty cells.
- */
-function cellToString(cell: { formattedValue?: string } | null | undefined): string {
-  return cell?.formattedValue ?? "";
-}
-
-/**
  * Fetches all sheets and their data from the spreadsheet using the Sheets API v4.
  * This is the main function called by index.ts on each scheduler tick.
  *

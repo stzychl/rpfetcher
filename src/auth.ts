@@ -20,7 +20,6 @@ import fs from "fs";
 import http from "http";
 import { URL } from "url";
 import open from "open";
-import path from "path";
 import { logger } from "./logger";
 
 // OAuth2 scopes — read-only access to spreadsheets
@@ -55,20 +54,33 @@ export async function getAuthClient(
 ): Promise<Auth.OAuth2Client> {
   if (cachedClient) return cachedClient;
 
-  // 1. Load client credentials
-  if (!fs.existsSync(credentialsPath)) {
-    throw new Error(
-      `credentials.json not found at: ${credentialsPath}\n` +
-      `  → Download it from https://console.cloud.google.com/apis/credentials\n` +
-      `  → Create an OAuth 2.0 Client ID (Desktop app type)`
+  let creds: any = null;
+
+  // 1. Load client credentials (env var or file)
+  if (process.env.GOOGLE_CREDENTIALS_JSON) {
+    try {
+      const rawCreds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+      creds = rawCreds.installed ?? rawCreds.web;
+      logger.info("Loaded Google Credentials from GOOGLE_CREDENTIALS_JSON environment variable.");
+    } catch (err: any) {
+      throw new Error(`Failed to parse GOOGLE_CREDENTIALS_JSON environment variable: ${err.message}`);
+    }
+  } else {
+    if (!fs.existsSync(credentialsPath)) {
+      throw new Error(
+        `credentials.json not found at: ${credentialsPath}\n` +
+        `  → Download it from https://console.cloud.google.com/apis/credentials\n` +
+        `  → Create an OAuth 2.0 Client ID (Desktop app type)\n` +
+        `  → Or set the GOOGLE_CREDENTIALS_JSON environment variable.`
+      );
+    }
+    const rawCreds: Credentials = JSON.parse(
+      fs.readFileSync(credentialsPath, "utf-8")
     );
+    creds = rawCreds.installed ?? rawCreds.web;
   }
 
-  const rawCreds: Credentials = JSON.parse(
-    fs.readFileSync(credentialsPath, "utf-8")
-  );
-  const creds = rawCreds.installed ?? rawCreds.web;
-  if (!creds) throw new Error("Unsupported credentials.json format.");
+  if (!creds) throw new Error("Unsupported credentials format.");
 
   const oAuth2Client = new google.auth.OAuth2(
     creds.client_id,
@@ -76,30 +88,51 @@ export async function getAuthClient(
     REDIRECT_URI
   );
 
-  // 2. Check for a saved token
-  if (fs.existsSync(tokenPath)) {
-    const token = JSON.parse(fs.readFileSync(tokenPath, "utf-8"));
+  // 2. Load token (env var or file)
+  let token: any = null;
+  let loadedFromEnv = false;
+
+  if (process.env.GOOGLE_TOKEN_JSON) {
+    try {
+      token = JSON.parse(process.env.GOOGLE_TOKEN_JSON);
+      loadedFromEnv = true;
+      logger.info("Loaded OAuth2 token from GOOGLE_TOKEN_JSON environment variable.");
+    } catch (err: any) {
+      throw new Error(`Failed to parse GOOGLE_TOKEN_JSON environment variable: ${err.message}`);
+    }
+  } else if (fs.existsSync(tokenPath)) {
+    token = JSON.parse(fs.readFileSync(tokenPath, "utf-8"));
+  }
+
+  if (token) {
     oAuth2Client.setCredentials(token);
 
     // Auto-save refreshed tokens
     oAuth2Client.on("tokens", (newTokens) => {
-      const existing = JSON.parse(fs.readFileSync(tokenPath, "utf-8"));
-      const merged = { ...existing, ...newTokens };
-      fs.writeFileSync(tokenPath, JSON.stringify(merged, null, 2));
-      logger.debug("OAuth2 token refreshed and saved.");
+      if (loadedFromEnv) {
+        const merged = { ...token, ...newTokens };
+        logger.warn("OAuth2 token refreshed! If your hosting is ephemeral, update your GOOGLE_TOKEN_JSON environment variable with this value:\n" + JSON.stringify(merged));
+      } else {
+        const existing = JSON.parse(fs.readFileSync(tokenPath, "utf-8"));
+        const merged = { ...existing, ...newTokens };
+        fs.writeFileSync(tokenPath, JSON.stringify(merged, null, 2));
+        logger.debug("OAuth2 token refreshed and saved to token.json.");
+      }
     });
 
-    logger.info("Loaded saved OAuth2 token from token.json");
+    if (!loadedFromEnv) {
+      logger.info("Loaded saved OAuth2 token from token.json");
+    }
     cachedClient = oAuth2Client;
     return oAuth2Client;
   }
 
   // 3. No token — start the browser-based OAuth2 consent flow
   logger.info(
-    "No token.json found. Starting OAuth2 browser authentication flow..."
+    "No token.json or GOOGLE_TOKEN_JSON env var found. Starting OAuth2 browser authentication flow..."
   );
-  const token = await runBrowserAuthFlow(oAuth2Client, tokenPath);
-  oAuth2Client.setCredentials(token);
+  const freshToken = await runBrowserAuthFlow(oAuth2Client, tokenPath);
+  oAuth2Client.setCredentials(freshToken);
 
   // Auto-save refreshed tokens going forward
   oAuth2Client.on("tokens", (newTokens) => {
