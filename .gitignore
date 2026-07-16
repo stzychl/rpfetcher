@@ -6,3 +6,4 @@ state/history/
 token.json
 *.js.map
 coverage/
+credentials.json
