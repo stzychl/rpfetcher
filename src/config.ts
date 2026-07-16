@@ -17,12 +17,6 @@ export interface Config {
   /** The spreadsheet ID from the Google Sheets URL: /d/SPREADSHEET_ID/edit */
   spreadsheetId: string;
 
-  /** Path to OAuth2 credentials.json (downloaded from Google Cloud Console) */
-  credentialsPath: string;
-
-  /** Path to saved OAuth2 token (auto-created after first login) */
-  tokenPath: string;
-
   /** Polling interval in milliseconds (default: 5 minutes) */
   checkIntervalMs: number;
 
@@ -109,8 +103,6 @@ export function loadConfig(): Config {
 
   return {
     spreadsheetId,
-    credentialsPath: path.resolve(process.cwd(), "credentials.json"),
-    tokenPath: path.resolve(process.cwd(), "token.json"),
     checkIntervalMs: intEnv("CHECK_INTERVAL_MS", 300_000),
     previousHashPath: path.resolve(process.cwd(), "state", "previousHash.json"),
     previousDataPath: path.resolve(process.cwd(), "state", "previousData.json"),

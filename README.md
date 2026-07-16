@@ -101,6 +101,32 @@ On first launch:
 4. You'll see a success page — return to your terminal
 5. A `token.json` file is saved locally — **never commit this file**
 
+### Render Deployment
+
+Render is supported in two ways:
+
+#### Option A — Environment Variables
+
+Set these Render environment variables:
+
+```env
+GOOGLE_CREDENTIALS_JSON=...
+GOOGLE_TOKEN_JSON=...
+```
+
+Use the full JSON contents from Google OAuth credentials and the saved OAuth token.
+
+#### Option B — Secret Files
+
+Mount the files in Render and set these environment variables to their mounted paths:
+
+```env
+GOOGLE_CREDENTIALS_PATH=/etc/secrets/credentials.json
+GOOGLE_TOKEN_PATH=/etc/secrets/token.json
+```
+
+The app will read the mounted files directly.
+
 ### Step 7 — The Monitor is Running! 🎉
 
 You'll see output like:
@@ -202,6 +228,10 @@ docker compose logs -f
 | Variable | Default | Description |
 |---|---|---|
 | `SPREADSHEET_ID` | *required* | ID from the spreadsheet URL |
+| `GOOGLE_CREDENTIALS_JSON` | — | Google OAuth client JSON for Render env vars |
+| `GOOGLE_TOKEN_JSON` | — | Saved OAuth token JSON for Render env vars |
+| `GOOGLE_CREDENTIALS_PATH` | `credentials.json` fallback | Path to Google OAuth client JSON file |
+| `GOOGLE_TOKEN_PATH` | `token.json` fallback | Path to saved OAuth token file |
 | `CHECK_INTERVAL_MS` | `300000` | Poll interval (milliseconds) |
 | `DASHBOARD_PORT` | `3000` | Web dashboard port |
 | `NOTIFY_CONSOLE` | `true` | Coloured terminal output |

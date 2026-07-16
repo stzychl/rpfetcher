@@ -127,7 +127,7 @@ async function main(): Promise<void> {
 
   // Authenticate via OAuth2 (opens browser on first run, reuses token.json after)
   logger.info("Authenticating with Google...");
-  authClient = await getAuthClient(config.credentialsPath, config.tokenPath);
+  authClient = await getAuthClient();
   logger.info("✅ Google authentication successful.");
 
   // Start optional Telegram startup notification
